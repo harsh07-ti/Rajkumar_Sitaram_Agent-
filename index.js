@@ -1,13 +1,16 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const mysql = require('mysql2');
+const fs = require('fs');
 
-// WhatsApp Client
 const client = new Client({
-    authStrategy: new LocalAuth()
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    }
 });
 
-// Database Connection
 const db = mysql.createConnection({
     host: "localhost",
     user: "root",
@@ -15,49 +18,132 @@ const db = mysql.createConnection({
     database: "school"
 });
 
-// QR Code Generate
+let userState = {};
+
 client.on('qr', qr => {
     qrcode.generate(qr, { small: true });
 });
 
-// Ready
 client.on('ready', () => {
-    console.log('✅ Rajkumar Sitaram School Bot Ready!');
+    console.log("✅ Rajkumar Sitaram Agent Bot Ready");
 });
 
-// Message System
-client.on('message', msg => {
-    let text = msg.body.toLowerCase();
+client.on('message', async msg => {
 
+    const mobile = msg.from.replace('@c.us','');
+    const text = msg.body.toLowerCase();
+
+    // Start Flow
     if (text === 'hi' || text === 'hello') {
-        msg.reply(`📚 Rajkumar Sitaram School में आपका स्वागत है
-
-1️⃣ Fees जानकारी
-2️⃣ Result
-3️⃣ Notice
-4️⃣ Student Details
-
-Reply number भेजें`);
+        userState[mobile] = { step: "name" };
+        return msg.reply("📚 Rajkumar Sitaram School\n\nअपना नाम बताइए");
     }
 
-    // Fees
-    if (text === '1') {
-        db.query("SELECT * FROM fees LIMIT 1", (err, result) => {
-            if (!err && result.length > 0) {
-                msg.reply(`💰 आपकी फीस: ₹${result[0].amount}`);
-            }
-        });
+    // Name
+    if (userState[mobile]?.step === "name") {
+        userState[mobile].name = msg.body;
+        userState[mobile].step = "class";
+        return msg.reply("अपनी कक्षा बताइए");
     }
 
-    // Notice
-    if (text === '3') {
-        db.query("SELECT * FROM notice ORDER BY id DESC LIMIT 1", (err, result) => {
-            if (!err && result.length > 0) {
-                msg.reply(`📢 Notice:\n${result[0].message}`);
-            }
-        });
+    // Class
+    if (userState[mobile]?.step === "class") {
+        userState[mobile].class = msg.body;
+        userState[mobile].step = "menu";
+
+        return msg.reply(`धन्यवाद ${userState[mobile].name}
+
+1️⃣ Fees
+2️⃣ Attendance
+3️⃣ Result
+4️⃣ Payment
+5️⃣ Receipt
+6️⃣ Notice
+7️⃣ Admission
+
+नंबर भेजें`);
+    }
+
+    // Menu System
+    if (userState[mobile]?.step === "menu") {
+
+        if (text === '1') {
+            db.query("SELECT * FROM students WHERE mobile=?", [mobile], (err, r) => {
+                if (r.length > 0) {
+                    let s = r[0];
+                    let due = s.total_fees - s.paid_fees;
+
+                    msg.reply(`💰 Fees
+
+Total: ₹${s.total_fees}
+Paid: ₹${s.paid_fees}
+Due: ₹${due}`);
+                }
+            });
+        }
+
+        else if (text === '2') {
+            db.query("SELECT * FROM students WHERE mobile=?", [mobile], (err, r) => {
+                if (r.length > 0) {
+                    msg.reply(`📊 Attendance: ${r[0].attendance}%`);
+                }
+            });
+        }
+
+        else if (text === '3') {
+            db.query("SELECT * FROM students WHERE mobile=?", [mobile], (err, r) => {
+                if (r.length > 0) {
+                    msg.reply(`📄 Result: ${r[0].result}`);
+                }
+            });
+        }
+
+        else if (text === '4') {
+            msg.reply(`💳 Payment
+
+UPI ID: school@upi
+
+📸 Screenshot भेजें`);
+        }
+
+        else if (text === '5') {
+            msg.reply("📄 Receipt जल्द भेजी जाएगी");
+        }
+
+        else if (text === '6') {
+            msg.reply("📢 Notice: कल अवकाश रहेगा");
+        }
+
+        else if (text === '7') {
+            userState[mobile].step = "admission";
+            msg.reply("नाम, कक्षा, मोबाइल भेजें\nExample: Rahul,10,9876543210");
+        }
+    }
+
+    // Admission
+    if (userState[mobile]?.step === "admission") {
+        let p = msg.body.split(',');
+        if (p.length === 3) {
+            db.query(
+                "INSERT INTO admissions (name,class,mobile) VALUES (?,?,?)",
+                [p[0], p[1], p[2]]
+            );
+            msg.reply("✅ Admission request save");
+            userState[mobile].step = "menu";
+        }
+    }
+
+    // Screenshot Upload
+    if (msg.hasMedia) {
+        const media = await msg.downloadMedia();
+        const file = `uploads/${Date.now()}.png`;
+
+        fs.writeFileSync(file, media.data, 'base64');
+
+        db.query("INSERT INTO payments (mobile,image) VALUES (?,?)", [mobile, file]);
+
+        msg.reply("✅ Screenshot मिला, verify होगा");
     }
 });
 
-// Start Bot
 client.initialize();
