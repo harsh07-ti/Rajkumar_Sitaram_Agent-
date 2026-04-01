@@ -1,0 +1,15 @@
+{
+  "name": "rajkumar-sitaram-school-agent",
+  "version": "1.0.0",
+  "description": "School WhatsApp Bot + User Panel + Admin Panel",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^3.2.0",
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
