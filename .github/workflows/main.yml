@@ -2,28 +2,18 @@ name: Rajkumar_Sitaram_Agent
 
 on:
   workflow_dispatch:
-  schedule:
-    # हर 5 घंटे में bot run होगा
-    - cron: '0 */5 * * *'
 
 jobs:
-  school-bot:
+  bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Code Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: ⚙️ Node.js Setup
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
-      - name: 📦 Install Dependencies
-        run: npm install
+      - run: npm install
 
-      - name: 🚀 Start School WhatsApp Bot
-        env:
-          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
-          SCHOOL_NAME: "Rajkumar Sitaram School"
-        run: node index.js
+      - run: node index.js
