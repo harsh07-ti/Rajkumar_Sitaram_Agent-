@@ -1,21 +1,19 @@
 // ===============================
-// 🚀 SCHOOL BOT + BACKEND
+// 🚀 RAJKUMAR SITARAM BOT SERVER
 // ===============================
 
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
-const P = require("pino");
+const pino = require("pino");
 
-// WhatsApp Baileys
-const {
-  default: makeWASocket,
-  useMultiFileAuthState
-} = require("@adiwajshing/baileys");
+const { default: makeWASocket, useMultiFileAuthState } = require("@adiwajshing/baileys");
 
-// ===============================
-// 🔥 FIREBASE CONFIG
-// ===============================
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// 🔥 Firebase Config (serviceAccountKey.json add karo)
 const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
@@ -26,24 +24,13 @@ admin.initializeApp({
 const db = admin.database();
 
 // ===============================
-// 🌐 EXPRESS SERVER
-// ===============================
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-app.get("/", (req, res) => {
-  res.send("Server Running 🚀");
-});
-
-// ===============================
 // 🤖 WHATSAPP BOT START
 // ===============================
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth");
 
   const sock = makeWASocket({
-    logger: P({ level: "silent" }),
+    logger: pino({ level: "silent" }),
     auth: state
   });
 
@@ -53,57 +40,96 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message) return;
 
-    const sender = msg.key.remoteJid;
-    const text =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text;
+    const text = msg.message.conversation || "";
+    const sender = msg.key.remoteJid.replace("@s.whatsapp.net", "");
 
-    const phone = sender.split("@")[0];
+    console.log("Message:", text);
 
-    // ===============================
-    // MENU
-    // ===============================
-    if (text === "hi" || text === "Hi") {
-      await sock.sendMessage(sender, {
-        text:
-          "👋 Welcome to School Bot\n\n" +
-          "1️⃣ Admission\n" +
-          "2️⃣ Attendance\n" +
-          "3️⃣ Result\n" +
-          "4️⃣ Fee\n" +
-          "5️⃣ Payment"
+    // 🔹 MENU
+    if (text.toLowerCase() === "hi") {
+      await sock.sendMessage(msg.key.remoteJid, {
+        text: "📚 Rajkumar Sitaram School\n\n1️⃣ Admission\n2️⃣ Attendance\n3️⃣ Result\n4️⃣ Fee\n5️⃣ Payment"
       });
     }
 
-    // ===============================
-    // ADMISSION
-    // ===============================
+    // 🔹 ADMISSION
     if (text === "1") {
-      const snap = await db.ref("students/" + phone).once("value");
+      const snap = await db.ref("students/" + sender).once("value");
       const data = snap.val();
 
-      if (!data) {
-        return sock.sendMessage(sender, { text: "No Admission Found ❌" });
+      if (data) {
+        await sock.sendMessage(msg.key.remoteJid, {
+          text: `👤 Name: ${data.name}\nClass: ${data.class}\nMobile: ${data.mobile}`
+        });
+      } else {
+        await sock.sendMessage(msg.key.remoteJid, {
+          text: "❌ No Admission Data Found"
+        });
       }
-
-      await sock.sendMessage(sender, {
-        text: `👨‍🎓 Name: ${data.name}\nClass: ${data.class}`
-      });
     }
 
-    // ===============================
-    // ATTENDANCE
-    // ===============================
+    // 🔹 ATTENDANCE
     if (text === "2") {
-      const snap = await db.ref("attendance/" + phone).once("value");
+      const snap = await db.ref("attendance/" + sender).once("value");
       const data = snap.val();
-
-      if (!data) return sock.sendMessage(sender, { text: "No Data ❌" });
 
       let msgText = "📅 Attendance:\n";
-      for (let d in data) {
-        msgText += `${d} - ${data[d]}\n`;
+      for (let date in data) {
+        msgText += `${date} - ${data[date]}\n`;
       }
+
+      await sock.sendMessage(msg.key.remoteJid, { text: msgText });
+    }
+
+    // 🔹 RESULT
+    if (text === "3") {
+      const snap = await db.ref("results/" + sender).once("value");
+      const data = snap.val();
+
+      await sock.sendMessage(msg.key.remoteJid, {
+        text: `📊 Total: ${data.total}\nPercentage: ${data.percentage}%`
+      });
+    }
+
+    // 🔹 FEE
+    if (text === "4") {
+      const snap = await db.ref("fees/" + sender).once("value");
+      const data = snap.val();
+
+      await sock.sendMessage(msg.key.remoteJid, {
+        text: `💰 Fee: ${data.monthlyFee}\nPaid: ${data.paid}\nDue: ${data.due}`
+      });
+    }
+
+    // 🔹 PAYMENT
+    if (text === "5") {
+      const snap = await db.ref("payments").once("value");
+      const payments = snap.val();
+
+      let msgText = "💳 Payments:\n";
+
+      for (let key in payments) {
+        if (payments[key].studentId === sender) {
+          msgText += `₹${payments[key].amount} (${payments[key].method})\n`;
+        }
+      }
+
+      await sock.sendMessage(msg.key.remoteJid, { text: msgText });
+    }
+  });
+}
+
+startBot();
+
+// ===============================
+// 🌐 API (OPTIONAL)
+// ===============================
+app.get("/", (req, res) => {
+  res.send("✅ Bot Running...");
+});
+
+const PORT = 3000;
+app.listen(PORT, () => console.log("Server running on port " + PORT));      }
 
       await sock.sendMessage(sender, { text: msgText });
     }
