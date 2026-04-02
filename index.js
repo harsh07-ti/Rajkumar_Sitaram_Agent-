@@ -1,172 +1,199 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
-const admin = require('firebase-admin');
-const fs = require('fs');
+const pino = require('pino');
 
-// 🔐 Firebase init
-const serviceAccount = JSON.parse(process.env.FIREBASE_URL);
+const FIREBASE_URL = process.env.FIREBASE_URL;
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: serviceAccount.databaseURL
-});
+// 🔥 UPI DETAILS
+const UPI_ID = "tiwari3355931@nyes";
+const QR_IMAGE = "https://i.ibb.co/pjX1S6Bk/Navi-QR-HARSHVARDHAN-TIWARI-02042026121324770.png"; // 👉 अपना QR image link डालना
 
-const db = admin.database();
+const userStates = {};
 
-// 🤖 WhatsApp client
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox']
-  }
-});
-
-let userState = {};
-
-// QR
-client.on('qr', qr => qrcode.generate(qr, { small: true }));
-
-client.on('ready', () => {
-  console.log("✅ Firebase Bot Ready");
-});
-
-// 📩 Message System
-client.on('message', async msg => {
-
-  const mobile = msg.from.replace('@c.us','');
-  const text = msg.body.toLowerCase();
-
-  // START
-  if (text === 'hi' || text === 'hello') {
-    userState[mobile] = { step: "name" };
-    return msg.reply("📚 Rajkumar Sitaram School\n\nअपना नाम बताइए");
-  }
-
-  // NAME
-  if (userState[mobile]?.step === "name") {
-    userState[mobile].name = msg.body;
-    userState[mobile].step = "class";
-    return msg.reply("अपनी कक्षा बताइए");
-  }
-
-  // CLASS
-  if (userState[mobile]?.step === "class") {
-    userState[mobile].class = msg.body;
-    userState[mobile].step = "menu";
-
-    return msg.reply(`धन्यवाद ${userState[mobile].name}
-
-1️⃣ Fees
-2️⃣ Attendance
-3️⃣ Result
-4️⃣ Payment
-5️⃣ Receipt
-6️⃣ Notice
-7️⃣ Admission
-
-नंबर भेजें`);
-  }
-
-  // MENU
-  if (userState[mobile]?.step === "menu") {
-
-    const studentRef = db.ref("students/" + mobile);
-    const snapshot = await studentRef.get();
-    const s = snapshot.val();
-
-    if (!s) {
-      return msg.reply("❌ आपका डेटा नहीं मिला");
+async function startBot() {
+    if (!FIREBASE_URL) {
+        console.log("❌ FIREBASE_URL missing!");
+        process.exit(1);
     }
 
-    let due = s.total_fees - s.paid_fees;
+    const { state, saveCreds } = await useMultiFileAuthState('session_data');
+    const { version } = await fetchLatestBaileysVersion();
 
-    if (text === '1') {
-      msg.reply(`💰 Fees
-
-Total: ₹${s.total_fees}
-Paid: ₹${s.paid_fees}
-Due: ₹${due}`);
-    }
-
-    else if (text === '2') {
-      msg.reply(`📊 Attendance: ${s.attendance}%`);
-    }
-
-    else if (text === '3') {
-      msg.reply(`📄 Result: ${s.result}`);
-    }
-
-    else if (text === '4') {
-      msg.reply(`💳 Payment
-
-UPI ID: school@upi
-
-📸 Screenshot भेजें`);
-    }
-
-    else if (text === '6') {
-      msg.reply("📢 Notice: कल अवकाश रहेगा");
-    }
-
-    else if (text === '7') {
-      userState[mobile].step = "admission";
-      msg.reply("नाम, कक्षा, मोबाइल भेजें\nExample: Rahul,10,9876543210");
-    }
-  }
-
-  // ADMISSION
-  if (userState[mobile]?.step === "admission") {
-    let p = msg.body.split(',');
-
-    if (p.length === 3) {
-      const id = Date.now();
-
-      await db.ref("admissions/" + id).set({
-        name: p[0],
-        class: p[1],
-        mobile: p[2]
-      });
-
-      msg.reply("✅ Admission request save");
-      userState[mobile].step = "menu";
-    }
-  }
-
-  // 📸 Screenshot Upload
-  if (msg.hasMedia) {
-    const media = await msg.downloadMedia();
-    const fileName = `uploads/${Date.now()}.png`;
-
-    fs.writeFileSync(fileName, media.data, 'base64');
-
-    await db.ref("payments/" + Date.now()).set({
-      mobile: mobile,
-      image: fileName,
-      status: "pending"
+    const sock = makeWASocket({
+        version,
+        auth: state,
+        printQRInTerminal: false,
+        logger: pino({ level: 'silent' }),
+        browser: ["School", "Bot", "1.0"]
     });
 
-    msg.reply("✅ Screenshot मिला, verify होगा");
-  }
-});
+    // 🔗 CONNECTION
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect, qr } = update;
 
-client.initialize();            );
-            msg.reply("✅ Admission request save");
-            userState[mobile].step = "menu";
+        if (qr) {
+            console.clear();
+            console.log("📱 Scan QR Code:");
+            qrcode.generate(qr, { small: true });
         }
-    }
 
-    // Screenshot Upload
-    if (msg.hasMedia) {
-        const media = await msg.downloadMedia();
-        const file = `uploads/${Date.now()}.png`;
+        if (connection === 'open') console.log('✅ School Bot Online!');
+        if (connection === 'close') {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            if (reason !== DisconnectReason.loggedOut) startBot();
+        }
+    });
 
-        fs.writeFileSync(file, media.data, 'base64');
+    sock.ev.on('creds.update', saveCreds);
 
-        db.query("INSERT INTO payments (mobile,image) VALUES (?,?)", [mobile, file]);
+    // 💬 MESSAGE HANDLER
+    sock.ev.on('messages.upsert', async (m) => {
+        const msg = m.messages[0];
+        if (!msg.message || msg.key.fromMe) return;
 
-        msg.reply("✅ Screenshot मिला, verify होगा");
-    }
-});
+        const sender = msg.key.remoteJid;
+        const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase();
 
-client.initialize();
+        const phone = sender.split("@")[0];
+
+        console.log("📩", text);
+
+        // ================= MENU =================
+        if (text === "hi" || text === "menu") {
+            await sock.sendMessage(sender, {
+                text: `🎓 *Rajkumar Sitaram School Agent*
+
+1️⃣ Admission
+2️⃣ Attendance
+3️⃣ Result
+4️⃣ Fee
+5️⃣ Payment
+
+Reply with number`
+            });
+        }
+
+        // ================= ADMISSION =================
+        else if (text === "1" || text === "admission") {
+            userStates[sender] = { step: "NAME" };
+            await sock.sendMessage(sender, { text: "📝 Enter Student Name:" });
+        }
+
+        else if (userStates[sender]?.step === "NAME") {
+            userStates[sender].name = text;
+            userStates[sender].step = "CLASS";
+            await sock.sendMessage(sender, { text: "Enter Class:" });
+        }
+
+        else if (userStates[sender]?.step === "CLASS") {
+            userStates[sender].class = text;
+            userStates[sender].step = "PHONE";
+            await sock.sendMessage(sender, { text: "Enter Phone Number:" });
+        }
+
+        else if (userStates[sender]?.step === "PHONE") {
+            const data = {
+                name: userStates[sender].name,
+                class: userStates[sender].class,
+                phone: text
+            };
+
+            await fetch(`${FIREBASE_URL}/admissions.json`, {
+                method: "POST",
+                body: JSON.stringify(data)
+            });
+
+            await sock.sendMessage(sender, { text: "✅ Admission Submitted Successfully!" });
+            delete userStates[sender];
+        }
+
+        // ================= ATTENDANCE =================
+        else if (text === "2" || text === "attendance") {
+            userStates[sender] = { step: "DATE" };
+            await sock.sendMessage(sender, { text: "📅 Enter Date (DD-MM-YYYY):" });
+        }
+
+        else if (userStates[sender]?.step === "DATE") {
+            userStates[sender].date = text;
+            userStates[sender].step = "STATUS";
+            await sock.sendMessage(sender, { text: "Present / Absent ?" });
+        }
+
+        else if (userStates[sender]?.step === "STATUS") {
+            await fetch(`${FIREBASE_URL}/attendance/${phone}.json`, {
+                method: "PATCH",
+                body: JSON.stringify({
+                    [userStates[sender].date]: text
+                })
+            });
+
+            await sock.sendMessage(sender, { text: "✅ Attendance Saved!" });
+            delete userStates[sender];
+        }
+
+        // ================= RESULT =================
+        else if (text === "3" || text === "result") {
+            const res = await fetch(`${FIREBASE_URL}/results/${phone}.json`);
+            const data = await res.json();
+
+            if (!data) {
+                await sock.sendMessage(sender, { text: "❌ Result not found" });
+                return;
+            }
+
+            await sock.sendMessage(sender, {
+                text: `📊 Result
+
+Name: ${data.name}
+Class: ${data.class}
+Marks: ${data.marks}
+Status: ${data.status}`
+            });
+        }
+
+        // ================= FEE =================
+        else if (text === "4" || text === "fee") {
+            const res = await fetch(`${FIREBASE_URL}/fees/${phone}.json`);
+            const data = await res.json();
+
+            if (!data) {
+                await sock.sendMessage(sender, { text: "❌ Fee data not found" });
+                return;
+            }
+
+            await sock.sendMessage(sender, {
+                text: `💰 Fee Details
+
+Amount: ₹${data.amount}
+Status: ${data.status}`
+            });
+        }
+
+        // ================= PAYMENT =================
+        else if (text === "5" || text === "payment") {
+            const res = await fetch(`${FIREBASE_URL}/fees/${phone}.json`);
+            const data = await res.json();
+
+            const amount = data?.amount || 0;
+
+            await sock.sendMessage(sender, {
+                image: { url: QR_IMAGE },
+                caption: `💳 *Pay School Fee*
+
+UPI ID: ${UPI_ID}
+Amount: ₹${amount}
+
+After payment, send screenshot.`
+            });
+        }
+
+        // ================= DEFAULT =================
+        else {
+            await sock.sendMessage(sender, {
+                text: "❓ Type *hi* to open menu"
+            });
+        }
+    });
+}
+
+startBot().catch(err => console.log(err));
