@@ -1,109 +1,167 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
-const pino = require('pino');
+// ===============================
+// 🚀 SCHOOL BOT + BACKEND
+// ===============================
 
-const FIREBASE_URL = process.env.FIREBASE_URL;
+const express = require("express");
+const cors = require("cors");
+const admin = require("firebase-admin");
+const P = require("pino");
 
-// 🔥 UPI DETAILS
-const UPI_ID = "tiwari3355931@nyes";
-const QR_IMAGE = "https://i.ibb.co/pjX1S6Bk/Navi-QR-HARSHVARDHAN-TIWARI-02042026121324770.png"; // 👉 अपना QR image link डालना
+// WhatsApp Baileys
+const {
+  default: makeWASocket,
+  useMultiFileAuthState
+} = require("@adiwajshing/baileys");
 
-const userStates = {};
+// ===============================
+// 🔥 FIREBASE CONFIG
+// ===============================
+const serviceAccount = require("./serviceAccountKey.json");
 
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://education-2d496-default-rtdb.firebaseio.com"
+});
+
+const db = admin.database();
+
+// ===============================
+// 🌐 EXPRESS SERVER
+// ===============================
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+app.get("/", (req, res) => {
+  res.send("Server Running 🚀");
+});
+
+// ===============================
+// 🤖 WHATSAPP BOT START
+// ===============================
 async function startBot() {
-    if (!FIREBASE_URL) {
-        console.log("❌ FIREBASE_URL missing!");
-        process.exit(1);
+  const { state, saveCreds } = await useMultiFileAuthState("auth");
+
+  const sock = makeWASocket({
+    logger: P({ level: "silent" }),
+    auth: state
+  });
+
+  sock.ev.on("creds.update", saveCreds);
+
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg.message) return;
+
+    const sender = msg.key.remoteJid;
+    const text =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text;
+
+    const phone = sender.split("@")[0];
+
+    // ===============================
+    // MENU
+    // ===============================
+    if (text === "hi" || text === "Hi") {
+      await sock.sendMessage(sender, {
+        text:
+          "👋 Welcome to School Bot\n\n" +
+          "1️⃣ Admission\n" +
+          "2️⃣ Attendance\n" +
+          "3️⃣ Result\n" +
+          "4️⃣ Fee\n" +
+          "5️⃣ Payment"
+      });
     }
 
-    const { state, saveCreds } = await useMultiFileAuthState('session_data');
-    const { version } = await fetchLatestBaileysVersion();
+    // ===============================
+    // ADMISSION
+    // ===============================
+    if (text === "1") {
+      const snap = await db.ref("students/" + phone).once("value");
+      const data = snap.val();
 
-    const sock = makeWASocket({
-        version,
-        auth: state,
-        printQRInTerminal: false,
-        logger: pino({ level: 'silent' }),
-        browser: ["School", "Bot", "1.0"]
-    });
+      if (!data) {
+        return sock.sendMessage(sender, { text: "No Admission Found ❌" });
+      }
 
-    // 🔗 CONNECTION
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
+      await sock.sendMessage(sender, {
+        text: `👨‍🎓 Name: ${data.name}\nClass: ${data.class}`
+      });
+    }
 
-        if (qr) {
-            console.clear();
-            console.log("📱 Scan QR Code:");
-            qrcode.generate(qr, { small: true });
+    // ===============================
+    // ATTENDANCE
+    // ===============================
+    if (text === "2") {
+      const snap = await db.ref("attendance/" + phone).once("value");
+      const data = snap.val();
+
+      if (!data) return sock.sendMessage(sender, { text: "No Data ❌" });
+
+      let msgText = "📅 Attendance:\n";
+      for (let d in data) {
+        msgText += `${d} - ${data[d]}\n`;
+      }
+
+      await sock.sendMessage(sender, { text: msgText });
+    }
+
+    // ===============================
+    // RESULT
+    // ===============================
+    if (text === "3") {
+      const snap = await db.ref("results/" + phone).once("value");
+      const data = snap.val();
+
+      if (!data) return sock.sendMessage(sender, { text: "No Result ❌" });
+
+      await sock.sendMessage(sender, {
+        text: `📊 Result: ${data.percentage}%`
+      });
+    }
+
+    // ===============================
+    // FEE
+    // ===============================
+    if (text === "4") {
+      const snap = await db.ref("fees/" + phone).once("value");
+      const data = snap.val();
+
+      if (!data) return sock.sendMessage(sender, { text: "No Fee Data ❌" });
+
+      await sock.sendMessage(sender, {
+        text: `💰 Fee:\nPaid: ₹${data.paid}\nDue: ₹${data.due}`
+      });
+    }
+
+    // ===============================
+    // PAYMENT
+    // ===============================
+    if (text === "5") {
+      const snap = await db.ref("payments").once("value");
+
+      let msgText = "💳 Payments:\n";
+      snap.forEach(child => {
+        const p = child.val();
+        if (p.studentId === phone) {
+          msgText += `₹${p.amount} (${p.method})\n`;
         }
+      });
 
-        if (connection === 'open') console.log('✅ School Bot Online!');
-        if (connection === 'close') {
-            const reason = lastDisconnect?.error?.output?.statusCode;
-            if (reason !== DisconnectReason.loggedOut) startBot();
-        }
-    });
+      await sock.sendMessage(sender, { text: msgText });
+    }
+  });
+}
 
-    sock.ev.on('creds.update', saveCreds);
+startBot();
 
-    // 💬 MESSAGE HANDLER
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
-
-        const sender = msg.key.remoteJid;
-        const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase();
-
-        const phone = sender.split("@")[0];
-
-        console.log("📩", text);
-
-        // ================= MENU =================
-        if (text === "hi" || text === "menu") {
-            await sock.sendMessage(sender, {
-                text: `🎓 *Rajkumar Sitaram School Agent*
-
-1️⃣ Admission
-2️⃣ Attendance
-3️⃣ Result
-4️⃣ Fee
-5️⃣ Payment
-
-Reply with number`
-            });
-        }
-
-        // ================= ADMISSION =================
-        else if (text === "1" || text === "admission") {
-            userStates[sender] = { step: "NAME" };
-            await sock.sendMessage(sender, { text: "📝 Enter Student Name:" });
-        }
-
-        else if (userStates[sender]?.step === "NAME") {
-            userStates[sender].name = text;
-            userStates[sender].step = "CLASS";
-            await sock.sendMessage(sender, { text: "Enter Class:" });
-        }
-
-        else if (userStates[sender]?.step === "CLASS") {
-            userStates[sender].class = text;
-            userStates[sender].step = "PHONE";
-            await sock.sendMessage(sender, { text: "Enter Phone Number:" });
-        }
-
-        else if (userStates[sender]?.step === "PHONE") {
-            const data = {
-                name: userStates[sender].name,
-                class: userStates[sender].class,
-                phone: text
-            };
-
-            await fetch(`${FIREBASE_URL}/admissions.json`, {
-                method: "POST",
-                body: JSON.stringify(data)
-            });
-
-            await sock.sendMessage(sender, { text: "✅ Admission Submitted Successfully!" });
+// ===============================
+// 🚀 SERVER START
+// ===============================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server Running on " + PORT));            await sock.sendMessage(sender, { text: "✅ Admission Submitted Successfully!" });
             delete userStates[sender];
         }
 
