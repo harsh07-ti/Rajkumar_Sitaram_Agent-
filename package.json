@@ -1,14 +1,18 @@
 {
   "name": "rajkumar_sitaram_agent",
   "version": "1.0.0",
+  "description": "School WhatsApp Bot + Firebase Backend",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "author": "Rajkumar Sitaram School",
+  "license": "MIT",
   "dependencies": {
-    "whatsapp-web.js": "^1.23.0",
-    "qrcode-terminal": "^0.12.0",
-    "firebase-admin": "^12.0.0",
-    "fs": "^0.0.1-security"
+    "express": "^4.18.2",
+    "firebase-admin": "^11.10.1",
+    "cors": "^2.8.5",
+    "@adiwajshing/baileys": "^6.6.0",
+    "pino": "^8.0.0"
   }
 }
